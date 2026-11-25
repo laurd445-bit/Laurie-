@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Slide Simplifier & Twi Explainer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     :root {
       --primary: #0f294a;
@@ -87,7 +88,7 @@
 
     textarea {
       width: 100%;
-      min-height: 150px;
+      min-height: 160px;
       padding: 12px;
       border-radius: 10px;
       border: 1px solid var(--border);
@@ -109,7 +110,7 @@
       align-items: center;
     }
 
-    select, input[type="password"] {
+    select {
       padding: 10px 12px;
       border-radius: 10px;
       border: 1px solid var(--border);
@@ -192,19 +193,18 @@
   <div class="container">
     <div class="header">
       <h1>Slide Analyzer &amp; Twi Explainer</h1>
-      <p>Upload or paste your lecture slides to break them down simply—and read or explain them in Twi.</p>
+      <p>Upload PDF slides or paste lecture notes to break them down simply—and read or explain them in Twi.</p>
     </div>
 
     <div class="card">
-      <h2 class="section-title">1. Upload or Paste Slide Content</h2>
+      <h2 class="section-title">1. Upload PDF Slides or Paste Content</h2>
       <div class="upload-box">
-        <div><strong>Upload a slide/note file</strong> (.txt, .md, .csv)</div>
-        <input type="file" id="slideFile" accept=".txt,.md,.csv" onchange="handleFileUpload(event)" />
-        <div class="helper-note">Tip: If your slides are in PowerPoint (.pptx) or PDF, copy-paste the slide text below (or export/save text).</div>
+        <div><strong>Upload your lecture slides</strong> (.pdf, .txt, .md, .csv)</div>
+        <input type="file" id="slideFile" accept=".pdf,.txt,.md,.csv" onchange="handleFileUpload(event)" />
+        <div class="helper-note">PDF files are read page-by-page automatically. For PowerPoint (.pptx), export as PDF first or paste the text below.</div>
       </div>
 
-      <textarea id="slideText" placeholder="Paste your lecture slide text here... Example:
-Ohm's Law states that the current flowing through a conductor between two points is directly proportional to the voltage across the two points, given constant temperature (V = IR)."></textarea>
+      <textarea id="slideText" placeholder="Extracted PDF text will appear here, or you can paste slide notes directly..."></textarea>
 
       <div class="controls-row">
         <label for="detailLevel"><strong>Explanation Style:</strong></label>
@@ -239,18 +239,63 @@ Ohm's Law states that the current flowing through a conductor between two points
   </div>
 
   <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+
     let simpleBreakdownText = "";
     let twiBreakdownText = "";
     let activeLangTab = "simple";
 
-    function handleFileUpload(event) {
+    async function handleFileUpload(event) {
       const file = event.target.files[0];
+      const statusEl = document.getElementById("statusMsg");
       if (!file) return;
+
+      const isPdf =
+        file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+      if (isPdf) {
+        if (!window.pdfjsLib) {
+          statusEl.textContent = "PDF reader is still loading. Check your internet connection and try again.";
+          return;
+        }
+
+        try {
+          statusEl.textContent = `Reading PDF "${file.name}"...`;
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const pageTexts = [];
+
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            statusEl.textContent = `Extracting slide/page ${pageNum} of ${pdf.numPages}...`;
+            const page = await pdf.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const strings = textContent.items.map(item => item.str).join(" ");
+            if (strings.trim()) {
+              pageTexts.push(`--- Slide / Page ${pageNum} ---\n${strings.trim()}`);
+            }
+          }
+
+          const combinedText = pageTexts.join("\n\n");
+          document.getElementById("slideText").value = combinedText;
+
+          if (!combinedText) {
+            statusEl.textContent = `Loaded "${file.name}", but no selectable text was found (it may be scanned images).`;
+          } else {
+            statusEl.textContent = `Extracted ${pdf.numPages} page(s) from "${file.name}". Click "Analyze & Break Down".`;
+          }
+        } catch (err) {
+          statusEl.textContent = `Error reading PDF: ${err && err.message ? err.message : String(err)}`;
+        }
+        return;
+      }
 
       const reader = new FileReader();
       reader.onload = function (e) {
         document.getElementById("slideText").value = e.target.result || "";
-        document.getElementById("statusMsg").textContent = `Loaded "${file.name}". Click "Analyze & Break Down".`;
+        statusEl.textContent = `Loaded "${file.name}". Click "Analyze & Break Down".`;
       };
       reader.readAsText(file);
     }
@@ -263,7 +308,6 @@ Ohm's Law states that the current flowing through a conductor between two points
     }
 
     function simplifySentence(sentence) {
-      // Lightweight local simplification for offline/instant preview
       return sentence
         .replace(/\butilize\b/gi, "use")
         .replace(/\bapproximately\b/gi, "about")
@@ -276,8 +320,6 @@ Ohm's Law states that the current flowing through a conductor between two points
     }
 
     function translateToSimpleTwi(englishSummary) {
-      // Built-in starter Twi framing + common study phrases.
-      // For full AI-powered Twi translation of any slide, connect this function to your backend / AI API.
       const clean = englishSummary.trim();
       if (!clean) return "";
 
@@ -298,7 +340,7 @@ Ohm's Law states that the current flowing through a conductor between two points
       const statusEl = document.getElementById("statusMsg");
 
       if (!rawText) {
-        statusEl.textContent = "Please upload a file or paste slide text first.";
+        statusEl.textContent = "Please upload a PDF/text file or paste slide text first.";
         return;
       }
 
@@ -322,7 +364,7 @@ Ohm's Law states that the current flowing through a conductor between two points
       twiBreakdownText = translateToSimpleTwi(simpleBreakdownText);
 
       renderActiveExplanation();
-      statusEl.textContent = `Analyzed ${chunks.length} point(s). Switch tabs above to view Simple or Twi.`;
+      statusEl.textContent = `Analyzed ${chunks.length} section(s). Switch tabs above to view Simple or Twi.`;
     }
 
     function switchLanguageTab(tab) {
